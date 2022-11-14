@@ -61,12 +61,12 @@ func (m *MyTests) TestMimicWriteRead() {
 	assert.NoError(m.T(), err, "pty should have allowed the write!")
 	assert.Equal(m.T(), written, fullWriteWidth, "pty should have written all bytes!")
 
-	assert.NoError(m.T(), console.ContainsString(full), "Emulated terminal should be %d columns, not %d columns as the written string", terminalWidth, fullWriteWidth)
-	assert.Error(m.T(), console.ContainsString(strings.Repeat(character, terminalWidth+1)), "Emulated terminal should be %d columns, but found %d characters", terminalWidth, terminalWidth+1)
-	assert.Error(m.T(), console.ContainsString(strings.Repeat(character, terminalWidth)), "Emulated terminal should have wrapped text at %d columns", terminalWidth)
+	assert.NoError(m.T(), console.ExpectString(full), "Emulated terminal should be %d columns, not %d columns as the written string", terminalWidth, fullWriteWidth)
+	assert.Error(m.T(), console.ExpectString(strings.Repeat(character, terminalWidth+1)), "Emulated terminal should be %d columns, but found %d characters", terminalWidth, terminalWidth+1)
+	assert.Error(m.T(), console.ExpectString(strings.Repeat(character, terminalWidth)), "Emulated terminal should have wrapped text at %d columns", terminalWidth)
 
-	assert.False(m.T(), console.ViewMatches(full), "underlying terminal is expected to wrap")
-	assert.True(m.T(), console.ViewMatches(strings.Repeat(character, terminalWidth)+"\n"+strings.Repeat(character, wrapLength)), "underlying terminal is expected to wrap")
+	assert.False(m.T(), console.ContainsString(full), "underlying terminal is expected to wrap")
+	assert.True(m.T(), console.ContainsString(strings.Repeat(character, terminalWidth)+"\n"+strings.Repeat(character, wrapLength)), "underlying terminal is expected to wrap")
 }
 
 func (m *MyTests) TestMimicWaitingForIdle() {
@@ -104,8 +104,8 @@ func (m *MyTests) TestMimicWaitingForIdle() {
 		return
 	}
 
-	assert.NoError(m.T(), console.ContainsString(strings.Repeat(".", targetCount)), "Console didn't include expected contents… Was: empty")
-	assert.Error(m.T(), console.ContainsString(strings.Repeat(".", targetCount+2)), "Console did not include expected contents… Was: empty")
+	assert.NoError(m.T(), console.ExpectString(strings.Repeat(".", targetCount)), "Console didn't include expected contents… Was: empty")
+	assert.Error(m.T(), console.ExpectString(strings.Repeat(".", targetCount+2)), "Console did not include expected contents… Was: empty")
 }
 
 func TestMimicOperationsSuite(t *testing.T) {
