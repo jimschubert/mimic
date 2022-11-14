@@ -17,11 +17,11 @@ func ExampleMimic_ContainsString() {
 	text := strings.Repeat("Hi", 16)
 	_, _ = m.WriteString(text)
 
-	if err := m.ContainsString(text); err != nil {
+	if err := m.ExpectString(text); err != nil {
 		println("The text should have wrapped!")
 	}
 
-	if err := m.ContainsString(strings.Repeat("Hi", 15)); err != nil {
+	if err := m.ExpectString(strings.Repeat("Hi", 15)); err != nil {
 		fmt.Printf("Found: %s\n\n", strings.Repeat("Hi", 15))
 	}
 

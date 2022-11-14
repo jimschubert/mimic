@@ -3,11 +3,13 @@ package mimic
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Netflix/go-expect"
@@ -158,17 +160,42 @@ func (m *Mimic) Close() (err error) {
 	return m.console.Close()
 }
 
-// ViewMatches determines if the emulated terminal's view matches specified string. A "view" takes into account terminal row/columns.
-func (m *Mimic) ViewMatches(str string) bool {
-	terminalContents := bytes.NewBufferString(m.terminal.String())
-	matcher := internal.PlainStringMatcher{
-		S: str,
+// ContainsString determines if the emulated terminal's view matches specified string. A "view" takes into account terminal row/columns.
+// Terminal contents are stripped of ANSI escape characters and trimmed.
+func (m *Mimic) ContainsString(str ...string) bool {
+	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
+	// instead, we flush which writes all runes to the terminal view, and check regexes against that
+	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), func(opts *expect.ExpectOpts) error {
+		opts.Matchers = append(opts.Matchers, &internal.FlushMatcher{})
+		return nil
+	})
+	if err != nil {
+		if isDebugEnabled() {
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsString: %v", err)
+		}
+		return false
 	}
-	return matcher.Match(terminalContents)
+
+	v := Viewer{Mimic: m, StripAnsi: true, Trim: true}
+	contents := v.String()
+
+	failed := 0
+	terminalContents := bytes.NewBufferString(contents)
+
+	for _, s := range str {
+		matcher := internal.PlainStringMatcher{
+			S: s,
+		}
+		if !matcher.Match(terminalContents) {
+			failed += 1
+		}
+	}
+	return failed == 0
 }
 
-// ContainsPattern determines if the emulated terminal's view contains one or more specified patterns
-func (m *Mimic) ContainsPattern(pattern ...string) error {
+// ContainsPattern determines if the emulated terminal's view contains one or more specified patterns.
+// Patterns are evaluated against formatted terminal contents, stripped of ANSI escape characters and trimmed.
+func (m *Mimic) ContainsPattern(pattern ...string) bool {
 	var regexes []*regexp.Regexp
 	for _, p := range pattern {
 		re := regexp.MustCompile(p)
@@ -176,12 +203,16 @@ func (m *Mimic) ContainsPattern(pattern ...string) error {
 	}
 
 	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
+	// instead, we flush which writes all runes to the terminal view, and check regexes against that
 	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), func(opts *expect.ExpectOpts) error {
 		opts.Matchers = append(opts.Matchers, &internal.FlushMatcher{})
 		return nil
 	})
 	if err != nil {
-		return err
+		if isDebugEnabled() {
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern: %v", err)
+		}
+		return false
 	}
 
 	v := Viewer{Mimic: m, StripAnsi: true, Trim: true}
@@ -193,15 +224,30 @@ func (m *Mimic) ContainsPattern(pattern ...string) error {
 		}
 	}
 
-	if len(failed) == 0 {
-		return nil
+	if len(pattern) > 0 && len(failed) == 0 {
+		return true
 	}
 
-	return PatternError{FailedPatterns: failed, Contents: contents}
+	if isDebugEnabled() {
+		_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern failed on: %v", strings.Join(failed, ","))
+	}
+
+	return false
 }
 
-// ContainsString determines if the emulated terminal's view contains one or more specified strings
-func (m *Mimic) ContainsString(str ...string) error {
+// ExpectPattern waits for the emulated terminal's view to contain one or more specified patterns
+func (m *Mimic) ExpectPattern(pattern ...string) error {
+	var regexes []*regexp.Regexp
+	for _, p := range pattern {
+		re := regexp.MustCompile(p)
+		regexes = append(regexes, re)
+	}
+	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), internal.Regexp(regexes...))
+	return err
+}
+
+// ExpectString waits for the emulated terminal's view to contain one or more specified strings
+func (m *Mimic) ExpectString(str ...string) error {
 	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), internal.String(str...))
 	return err
 }
@@ -209,6 +255,11 @@ func (m *Mimic) ContainsString(str ...string) error {
 // Tty provides the underlying tty required for interacting with this console
 func (m *Mimic) Tty() *os.File {
 	return m.console.Tty()
+}
+
+// Fd file descriptor of underlying pty.
+func (m *Mimic) Fd() uintptr {
+	return m.console.Fd()
 }
 
 // NewMimic creates a Mimic, which emulates a pseudo terminal device and provides
@@ -290,7 +341,21 @@ func isDebugEnabled() bool {
 	return false
 }
 
+// for file-based Stdout
+type fileWriter interface {
+	io.Writer
+	Fd() uintptr
+}
+
+// for file-based Stdin
+type fileReader interface {
+	io.Reader
+	Fd() uintptr
+}
+
 var (
 	// compile-time contracts (promises made to consumers)
 	_ io.ReadWriteCloser = (*Mimic)(nil)
+	_ fileWriter         = (*Mimic)(nil)
+	_ fileReader         = (*Mimic)(nil)
 )
