@@ -34,3 +34,21 @@ func ExampleMimic_ContainsString() {
 	// HiHiHiHiHiHiHiHiHiHiHiHiHiHiHi
 	// Hi
 }
+
+func ExampleViewer_String() {
+	m, _ := mimic.NewMimic(
+		mimic.WithSize(24, 80),
+		mimic.WithIdleTimeout(300*time.Millisecond),
+	)
+
+	text := "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed vulputate odio ut enim blandit volutpat maecenas volutpat."
+	_, _ = m.WriteString(text)
+	_ = m.NoMoreExpectations()
+	formatted := mimic.Viewer{Mimic: m, StripAnsi: true, Trim: true}
+	fmt.Printf("%s\n", formatted.String())
+
+	// Output:
+	// Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor i
+	// ncididunt ut labore et dolore magna aliqua. Sed vulputate odio ut enim blandit v
+	// olutpat maecenas volutpat.
+}

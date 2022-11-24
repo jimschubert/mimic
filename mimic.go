@@ -85,6 +85,7 @@ type Mimic struct {
 	terminal     vt10x.Terminal
 	maxIdleWait  time.Duration
 	idleDuration time.Duration
+	Experimental Experimental
 }
 
 // WaitForIdle causes the emulated terminal to spin, waiting the terminal output to "stabilize" (i.e. no writes are occurring)
@@ -128,15 +129,6 @@ func (m *Mimic) WaitForIdle(ctx context.Context) error {
 	}
 }
 
-// WaitAsync fires an event after wait duration
-func (m *Mimic) WaitAsync(wait time.Duration) chan<- struct{} {
-	result := make(chan<- struct{}, 1)
-	time.AfterFunc(wait, func() {
-		result <- struct{}{}
-	})
-	return result
-}
-
 // WriteString writes a value to the underlying terminal
 func (m *Mimic) WriteString(str string) (int, error) {
 	return m.console.Send(str)
@@ -148,16 +140,24 @@ func (m *Mimic) Write(b []byte) (int, error) {
 	return m.WriteString(string(b))
 }
 
-// Read reads bytes from the underlying terminal
+// Read bytes from the underlying terminal
 // Fulfills the io.Reader interface.
 func (m *Mimic) Read(p []byte) (n int, err error) {
 	return m.console.Tty().Read(p)
 }
 
-// Close causes any underlying emulation to close
+// Close causes any underlying emulation to close.
 // Fulfills the io.Closer interface.
 func (m *Mimic) Close() (err error) {
 	return m.console.Close()
+}
+
+func (m *Mimic) Flush() error {
+	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), func(opts *expect.ExpectOpts) error {
+		opts.Matchers = append(opts.Matchers, &internal.FlushMatcher{})
+		return nil
+	})
+	return err
 }
 
 // ContainsString determines if the emulated terminal's view matches specified string. A "view" takes into account terminal row/columns.
@@ -165,10 +165,7 @@ func (m *Mimic) Close() (err error) {
 func (m *Mimic) ContainsString(str ...string) bool {
 	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
 	// instead, we flush which writes all runes to the terminal view, and check regexes against that
-	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), func(opts *expect.ExpectOpts) error {
-		opts.Matchers = append(opts.Matchers, &internal.FlushMatcher{})
-		return nil
-	})
+	err := m.Flush()
 	if err != nil {
 		if isDebugEnabled() {
 			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsString: %v", err)
@@ -204,10 +201,7 @@ func (m *Mimic) ContainsPattern(pattern ...string) bool {
 
 	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
 	// instead, we flush which writes all runes to the terminal view, and check regexes against that
-	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), func(opts *expect.ExpectOpts) error {
-		opts.Matchers = append(opts.Matchers, &internal.FlushMatcher{})
-		return nil
-	})
+	err := m.Flush()
 	if err != nil {
 		if isDebugEnabled() {
 			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern: %v", err)
@@ -252,6 +246,20 @@ func (m *Mimic) ExpectString(str ...string) error {
 	return err
 }
 
+// NoMoreExpectations signals the underlying buffer to finish writing bytes to the underlying pseudo-terminal.
+func (m *Mimic) NoMoreExpectations() error {
+	err := m.Flush()
+	if err != nil {
+		if isDebugEnabled() {
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: NoMoreExpectations: %v", err)
+		}
+		return err
+	}
+
+	_, err = m.console.ExpectEOF()
+	return err
+}
+
 // Tty provides the underlying tty required for interacting with this console
 func (m *Mimic) Tty() *os.File {
 	return m.console.Tty()
@@ -284,12 +292,19 @@ func NewMimic(opts ...Option) (*Mimic, error) {
 
 	consoleOptions := make([]expect.ConsoleOpt, 0)
 
+	terminal := vt10x.New(
+		vt10x.WithWriter(tty),
+		vt10x.WithSize(o.columns, o.rows),
+	)
+
 	stdIn := make([]io.Reader, 0)
+	stdIn = append(stdIn, pty)
 	if o.in != nil {
 		stdIn = append(stdIn, o.in)
 	}
 
 	stdOut := make([]io.Writer, 0)
+	stdOut = append(stdOut, terminal)
 	if o.w != nil {
 		stdOut = append(stdOut, o.w)
 	}
@@ -307,29 +322,22 @@ func NewMimic(opts ...Option) (*Mimic, error) {
 		consoleOptions = append(consoleOptions, expect.WithLogger(log.New(os.Stderr, "mimic: ", 0)))
 	}
 
-	terminal := vt10x.New(
-		vt10x.WithWriter(tty),
-		vt10x.WithSize(o.columns, o.rows),
-	)
-
-	consoleOptions = append(consoleOptions, expect.WithSendObserver(func(msg string, num int, err error) {
-		if err == nil && num > 0 {
-			_, _ = terminal.Write([]byte(msg))
-		}
-	}))
-
 	c, err := expect.NewConsole(consoleOptions...)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &Mimic{
+	m := Mimic{
 		console:      c,
 		terminal:     terminal,
 		maxIdleWait:  o.maxIdleTimeout,
 		idleDuration: o.idleDuration,
-	}, nil
+	}
+
+	m.Experimental = exp(m)
+
+	return &m, nil
 }
 
 func isDebugEnabled() bool {

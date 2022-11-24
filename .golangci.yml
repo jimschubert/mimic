@@ -36,7 +36,7 @@ linters-settings:
   stylecheck:
     checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
     dot-import-whitelist:
-      - vcr
+      - mimic
     # https://staticcheck.io/docs/configuration/options/#initialisms
     initialisms:
     - API
@@ -53,7 +53,6 @@ linters-settings:
     - URI
     - URL
     - UUID
-    - VCR
     - VHS
     - XML
 
