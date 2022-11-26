@@ -1,0 +1,43 @@
+name: Create Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Unshallow
+        run: git fetch --prune --unshallow
+      - name: Find Last Tag
+        id: last
+        uses: jimschubert/query-tag-action@v1
+        with:
+          include: 'v*'
+          exclude: '*-rc*'
+          commit-ish: 'HEAD~'
+          skip-unshallow: 'true'
+      - name: Find Current Tag
+        id: current
+        uses: jimschubert/query-tag-action@v1
+        with:
+          include: 'v*'
+          exclude: '*-rc*'
+          commit-ish: '@'
+          skip-unshallow: 'true'
+      - name: Create Changelog
+        id: changelog
+        uses: jimschubert/beast-changelog-action@v1
+        with:
+          CONFIG_LOCATION: .github/changelog.yml
+          FROM: ${{steps.last.outputs.tag}}
+          TO: ${{steps.current.outputs.tag}}
+      - name: View Changelog
+        run: cat .github/CHANGELOG.md
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: ${{ github.workspace }}/.github/CHANGELOG.md

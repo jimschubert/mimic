@@ -24,3 +24,4 @@ exclude:
 sort: asc
 max_commits: 250
 local: false
+template: .github/changelog.tpl
