@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Netflix/go-expect"
@@ -18,11 +19,27 @@ import (
 	"github.com/jimschubert/mimic/internal"
 )
 
+const (
+	// DefaultColumns for the underlying view-based terminal's column count (i.e. width)
+	DefaultColumns = 132
+	// DefaultRows for the underlying view-based terminal's row count (i.e. height)
+	DefaultRows = 24
+	// DefaultIdleTimeout when the underlying terminal is idle (i.e. fails to match an expectation), used by functions
+	// such as Mimic.ExpectString, Mimic.ContainsString, Mimic.ExpectPattern, and Mimic.ContainsPattern
+	DefaultIdleTimeout = 250 * time.Millisecond
+	// DefaultFlushTimeout for mimic's flush operation. Mimic will invoke flush only if there are outstanding operations
+	// from Mimic.Write or Mimic.WriteString.
+	DefaultFlushTimeout = 25 * time.Millisecond
+	// DefaultIdleDuration for mimic to consider the terminal idle via Mimic.WaitForIdle.
+	DefaultIdleDuration = 100 * time.Millisecond
+)
+
 type mimicOpt struct {
 	w              io.Writer
 	in             io.Reader
 	maxIdleTimeout time.Duration
 	idleDuration   time.Duration
+	flushTimeout   time.Duration
 	rows           int
 	columns        int
 	pipeFromOS     bool
@@ -32,6 +49,14 @@ type mimicOpt struct {
 // see WithOutput, WithStdout, WithSize
 type Option func(*mimicOpt)
 
+// WithFlushTimeout defines the timeout for mimic's flush operation. Mimic will invoke flush only if there
+// are outstanding operations from Mimic.Write or Mimic.WriteString.
+func WithFlushTimeout(timeout time.Duration) Option {
+	return func(opt *mimicOpt) {
+		opt.flushTimeout = timeout
+	}
+}
+
 // WithIdleTimeout defines the timeout period for mimic operations which wait for the terminal to become idle
 func WithIdleTimeout(timeout time.Duration) Option {
 	return func(opt *mimicOpt) {
@@ -39,7 +64,7 @@ func WithIdleTimeout(timeout time.Duration) Option {
 	}
 }
 
-// WithIdleDuration defines the duration required for mimic to consider the terminal idle
+// WithIdleDuration defines the duration required for mimic to consider the terminal idle via Mimic.WaitForIdle.
 func WithIdleDuration(duration time.Duration) Option {
 	return func(opt *mimicOpt) {
 		opt.idleDuration = duration
@@ -85,6 +110,8 @@ type Mimic struct {
 	terminal     vt10x.Terminal
 	maxIdleWait  time.Duration
 	idleDuration time.Duration
+	flushTimeout time.Duration
+	flushed      *int32 // convert to atomic.Bool in 1.19
 	Experimental Experimental
 }
 
@@ -131,12 +158,14 @@ func (m *Mimic) WaitForIdle(ctx context.Context) error {
 
 // WriteString writes a value to the underlying terminal
 func (m *Mimic) WriteString(str string) (int, error) {
+	atomic.SwapInt32(m.flushed, 1)
 	return m.console.Send(str)
 }
 
 // Write writes a value to the underlying terminal.
 // Fulfills the io.Writer interface.
 func (m *Mimic) Write(b []byte) (int, error) {
+	atomic.SwapInt32(m.flushed, 1)
 	return m.WriteString(string(b))
 }
 
@@ -152,11 +181,21 @@ func (m *Mimic) Close() (err error) {
 	return m.console.Close()
 }
 
+// Flush (or attempt to flush) any pending writes done via Write or WriteString.
 func (m *Mimic) Flush() error {
-	_, err := m.console.Expect(expect.WithTimeout(m.maxIdleWait), func(opts *expect.ExpectOpts) error {
-		opts.Matchers = append(opts.Matchers, &internal.FlushMatcher{})
+	if !atomic.CompareAndSwapInt32(m.flushed, 1, 0) {
+		// already flushed
+		return nil
+	}
+
+	_, err := m.console.Expect(expect.WithTimeout(m.flushTimeout), func(opts *expect.ExpectOpts) error {
+		opts.Matchers = append(opts.Matchers, &internal.AnyMatcher{Matchers: []expect.Matcher{
+			&internal.EOFMatcher{},
+			&internal.FlushMatcher{},
+		}})
 		return nil
 	})
+
 	return err
 }
 
@@ -164,11 +203,11 @@ func (m *Mimic) Flush() error {
 // Terminal contents are stripped of ANSI escape characters and trimmed.
 func (m *Mimic) ContainsString(str ...string) bool {
 	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
-	// instead, we flush which writes all runes to the terminal view, and check regexes against that
+	// instead, we Flush which writes all runes to the terminal view, and check regexes against that
 	err := m.Flush()
 	if err != nil {
 		if isDebugEnabled() {
-			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsString: %v", err)
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsString: %v\n", err)
 		}
 		return false
 	}
@@ -200,11 +239,11 @@ func (m *Mimic) ContainsPattern(pattern ...string) bool {
 	}
 
 	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
-	// instead, we flush which writes all runes to the terminal view, and check regexes against that
+	// instead, we Flush which writes all runes to the terminal view, and check regexes against that
 	err := m.Flush()
 	if err != nil {
 		if isDebugEnabled() {
-			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern: %v", err)
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern: %v\n", err)
 		}
 		return false
 	}
@@ -223,7 +262,7 @@ func (m *Mimic) ContainsPattern(pattern ...string) bool {
 	}
 
 	if isDebugEnabled() {
-		_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern failed on: %v", strings.Join(failed, ","))
+		_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern failed on: %v\n", strings.Join(failed, ","))
 	}
 
 	return false
@@ -248,6 +287,7 @@ func (m *Mimic) ExpectString(str ...string) error {
 
 // NoMoreExpectations signals the underlying buffer to finish writing bytes to the underlying pseudo-terminal.
 func (m *Mimic) NoMoreExpectations() error {
+	// We flush here because ExpectEOF can sometimes "hang" if there are no Expect interactions prior to calling it.
 	err := m.Flush()
 	if err != nil {
 		if isDebugEnabled() {
@@ -280,10 +320,11 @@ func NewMimic(opts ...Option) (*Mimic, error) {
 
 	o := &mimicOpt{
 		w:              io.Discard,
-		columns:        132,
-		rows:           24,
-		maxIdleTimeout: 5 * time.Second,
-		idleDuration:   250 * time.Millisecond,
+		columns:        DefaultColumns,
+		rows:           DefaultRows,
+		maxIdleTimeout: DefaultIdleTimeout,
+		flushTimeout:   DefaultFlushTimeout,
+		idleDuration:   DefaultIdleDuration,
 	}
 
 	for _, opt := range opts {
@@ -328,11 +369,14 @@ func NewMimic(opts ...Option) (*Mimic, error) {
 		return nil, err
 	}
 
+	var flushed int32
 	m := Mimic{
 		console:      c,
 		terminal:     terminal,
 		maxIdleWait:  o.maxIdleTimeout,
 		idleDuration: o.idleDuration,
+		flushTimeout: o.flushTimeout,
+		flushed:      &flushed,
 	}
 
 	m.Experimental = exp(m)

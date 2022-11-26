@@ -97,7 +97,7 @@ func TestMimic_ExpectString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, err := NewMimic(WithIdleDuration(20 * time.Millisecond))
+			m, err := NewMimic(WithIdleDuration(20*time.Millisecond), WithIdleTimeout(50*time.Millisecond))
 			assert.NoError(t, err)
 
 			_, err = m.WriteString(tt.contents)
@@ -136,7 +136,7 @@ func TestMimic_ExpectPattern(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, err := NewMimic(WithIdleDuration(20 * time.Millisecond))
+			m, err := NewMimic(WithIdleDuration(20*time.Millisecond), WithIdleTimeout(50*time.Millisecond))
 			assert.NoError(t, err)
 
 			_, err = m.WriteString(tt.contents)
