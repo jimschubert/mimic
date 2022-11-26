@@ -12,6 +12,8 @@ func ExampleMimic_ContainsString() {
 	columns := 26
 	m, _ := mimic.NewMimic(
 		mimic.WithSize(24, columns),
+		mimic.WithFlushTimeout(75*time.Millisecond),
+		mimic.WithIdleDuration(50*time.Millisecond),
 	)
 
 	// create three rows of text…
