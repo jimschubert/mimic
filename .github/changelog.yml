@@ -22,6 +22,6 @@ exclude:
   - '^(?i)style\b'
   - '^(?i)chore\b'
 sort: asc
-max_commits: 250
+max_commits: 25
 local: false
 template: .github/changelog.tpl
