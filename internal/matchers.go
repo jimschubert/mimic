@@ -2,6 +2,8 @@ package internal
 
 import (
 	"bytes"
+	"io"
+	"io/fs"
 	"regexp"
 	"strings"
 
@@ -9,15 +11,62 @@ import (
 	"github.com/jimschubert/stripansi"
 )
 
-// FlushMatcher fulfills the matcher interface, allowing for a flush of go-expect's internal buffer (forces write to vtx10 terminal)
+// FlushMatcher fulfills the matcher interface, allowing for a flush of go-expect's internal buffer (forces write to vtx10 terminal).
+// Functionally, it matches nothing until the end of the stream or a timeout, whichever comes first
 type FlushMatcher struct{}
 
 func (f FlushMatcher) Match(v interface{}) bool {
-	return true
+	if err, ok := v.(error); ok {
+		if pathError, isReadErr := err.(*fs.PathError); isReadErr {
+			if pathError.Op == "read" && pathError.Err.Error() == "i/o timeout" {
+				// we've flushed as much as we can and hit a read timeout
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (f FlushMatcher) Criteria() interface{} {
 	return struct{}{}
+}
+
+// EOFMatcher matches if the character evaluated is io.EOF
+type EOFMatcher struct{}
+
+func (e EOFMatcher) Match(v interface{}) bool {
+	err, ok := v.(error)
+	if !ok {
+		// not an error
+		return false
+	}
+	return err == io.EOF
+}
+
+func (e EOFMatcher) Criteria() interface{} {
+	return io.EOF
+}
+
+// AnyMatcher collects multiple matchers to be evaluated as a single unit via Console.Expect
+type AnyMatcher struct {
+	Matchers []expect.Matcher
+}
+
+func (a AnyMatcher) Match(v interface{}) bool {
+	for _, matcher := range a.Matchers {
+		if matcher.Match(v) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a AnyMatcher) Criteria() interface{} {
+	var criterias []interface{}
+	for _, matcher := range a.Matchers {
+		criterias = append(criterias, matcher.Criteria())
+	}
+	return criterias
 }
 
 // PlainStringMatcher fulfills the Matcher interface against strings without ansi codes
