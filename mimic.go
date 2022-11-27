@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/Netflix/go-expect"
@@ -111,7 +110,6 @@ type Mimic struct {
 	maxIdleWait  time.Duration
 	idleDuration time.Duration
 	flushTimeout time.Duration
-	flushed      *int32 // convert to atomic.Bool in 1.19
 	Experimental Experimental
 }
 
@@ -158,14 +156,12 @@ func (m *Mimic) WaitForIdle(ctx context.Context) error {
 
 // WriteString writes a value to the underlying terminal
 func (m *Mimic) WriteString(str string) (int, error) {
-	atomic.SwapInt32(m.flushed, 1)
 	return m.console.Send(str)
 }
 
 // Write writes a value to the underlying terminal.
 // Fulfills the io.Writer interface.
 func (m *Mimic) Write(b []byte) (int, error) {
-	atomic.SwapInt32(m.flushed, 1)
 	return m.WriteString(string(b))
 }
 
@@ -183,11 +179,6 @@ func (m *Mimic) Close() (err error) {
 
 // Flush (or attempt to flush) any pending writes done via Write or WriteString.
 func (m *Mimic) Flush() error {
-	if !atomic.CompareAndSwapInt32(m.flushed, 1, 0) {
-		// already flushed
-		return nil
-	}
-
 	_, err := m.console.Expect(expect.WithTimeout(m.flushTimeout), func(opts *expect.ExpectOpts) error {
 		opts.Matchers = append(opts.Matchers, &internal.AnyMatcher{Matchers: []expect.Matcher{
 			&internal.EOFMatcher{},
@@ -369,14 +360,12 @@ func NewMimic(opts ...Option) (*Mimic, error) {
 		return nil, err
 	}
 
-	var flushed int32
 	m := Mimic{
 		console:      c,
 		terminal:     terminal,
 		maxIdleWait:  o.maxIdleTimeout,
 		idleDuration: o.idleDuration,
 		flushTimeout: o.flushTimeout,
-		flushed:      &flushed,
 	}
 
 	m.Experimental = exp(m)
