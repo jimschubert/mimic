@@ -41,3 +41,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           body_path: ${{ github.workspace }}/.github/CHANGELOG.md
+      - name: Wait 1 minute
+        run: sleep 60
+      - name: Update pkg.go.dev
+        run: curl https://proxy.golang.org/github.com/${{ github.repository }}/@v/${{ github.ref_name }}.info || echo "pkg.go.dev not updated"
