@@ -4,44 +4,10 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Unshallow
-        run: git fetch --prune --unshallow
-      - name: Find Last Tag
-        id: last
-        uses: jimschubert/query-tag-action@v1
-        with:
-          include: 'v*'
-          exclude: '*-rc*'
-          commit-ish: 'HEAD~'
-          skip-unshallow: 'true'
-      - name: Find Current Tag
-        id: current
-        uses: jimschubert/query-tag-action@v1
-        with:
-          include: 'v*'
-          exclude: '*-rc*'
-          commit-ish: '@'
-          skip-unshallow: 'true'
-      - name: Create Changelog
-        id: changelog
-        uses: jimschubert/beast-changelog-action@v1
-        with:
-          CONFIG_LOCATION: .github/changelog.yml
-          FROM: ${{steps.last.outputs.tag}}
-          TO: ${{steps.current.outputs.tag}}
-      - name: View Changelog
-        run: cat .github/CHANGELOG.md
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          body_path: ${{ github.workspace }}/.github/CHANGELOG.md
-      - name: Wait 1 minute
-        run: sleep 60
-      - name: Update pkg.go.dev
-        run: curl https://proxy.golang.org/github.com/${{ github.repository }}/@v/${{ github.ref_name }}.info || echo "pkg.go.dev not updated"
+    uses: jimschubert/.workflows/.github/workflows/go-release.yml@main
+    secrets: inherit
