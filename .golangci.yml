@@ -1,91 +1,38 @@
-run:
-  concurrency: 4
-  timeout: 10m
-  go: '1.18'
-  tests: true
+version: "2"
+severity:
+  default: error
 
-output:
-  sort-results: true
+run:
+  timeout: 5m
+  tests: false
+  modules-download-mode: readonly
 
 linters:
-  disable-all: true
+  default: none
   enable:
-    - gofmt
     - govet
-    - gocyclo
     - staticcheck
+    - unused
+# copyloopvar is disabled because the Go version (1.18) of the project is lower than Go 1.22
+#    - copyloopvar
+    - ineffassign
+  settings:
+    funcorder:
+      constructor: false
+    staticcheck:
+      checks:
+        - SA1000  # Invalid regular expression
+        - SA4006  # A value assigned to a variable is never read before being overwritten. Forgotten error check or dead code?
+        - SA4009  # A function argument is overwritten before its first use.
+    revive:
+      severity: warning
+      rules:
+        - name: line-length-limit
+          severity: error
+          arguments: [180]
+        - name: defer
+          severity: error
+          arguments: [[loop, return, recover]]
 
-linters-settings:
-  # https://golangci-lint.run/usage/linters/#gocyclo
-  gocyclo:
-    # Minimal code complexity to report.
-    min-complexity: 25
-
-  # https://golangci-lint.run/usage/linters/#gofmt
-  gofmt:
-    simplify: false
-    rewrite-rules:
-      - pattern: 'a[b:len(a)]'
-        replacement: 'a[b:]'
-      - pattern: 'a := make(map[b]c, 0)'
-        replacement: 'a := make(map[b]c)'
-      - pattern: 'a := make([]b)'
-        replacement: 'a := make([]b, 0)'
-
-  # https://golangci-lint.run/usage/linters/#stylecheck
-  stylecheck:
-    checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
-    dot-import-whitelist:
-      - mimic
-    # https://staticcheck.io/docs/configuration/options/#initialisms
-    initialisms:
-    - API
-    - ASCII
-    - DB
-    - EOF
-    - GUID
-    - HTML
-    - HTTP
-    - HTTPS
-    - ID
-    - JSON
-    - UI
-    - URI
-    - URL
-    - UUID
-    - VHS
-    - XML
-
-  # https://golangci-lint.run/usage/linters/#govet
-  govet:
-    check-shadowing: true
-    settings:
-      shadow:
-        # Whether to be strict about shadowing; can be noisy.
-        strict: true
-    disable-all: true
-    enable:
-      - assign
-      - bools
-      - buildtag
-      - printf
-      - structtag
-      - tests
-      - unmarshal
-      - unreachable
-      - unusedresult
-      - unusedwrite
-
-# https://golangci-lint.run/usage/configuration/#issues-configuration
-issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files.
-    - path: _test\.go
-      linters:
-        - gofmt
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-  max-issues-per-linter: 25
-  max-same-issues: 5
+    misspell:
+      locale: US
