@@ -174,7 +174,7 @@ func (b *Suite) caller() string {
 func (b *Suite) Mimic(opts ...mimic.Option) (*mimic.Mimic, error) {
 	key := b.caller()
 	if key == "" {
-		return nil, errors.New("unable to determine name of calling test function")
+		return nil, errors.New("suite Mimic must be invoked from a managed test method")
 	}
 
 	if tc, ok := b.testCases[key]; ok && tc.mimic != nil {
