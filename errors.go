@@ -5,17 +5,13 @@ import (
 	"strings"
 )
 
+// PatternError describes a failure to match one or more patterns against
+// terminal contents returned from a Mimic.
 type PatternError struct {
 	Contents       string
 	FailedPatterns []string
 }
 
 func (p PatternError) Error() string {
-	var suffix string
-	count := len(p.FailedPatterns)
-	if count > 0 {
-		suffix = "s"
-	}
-
-	return fmt.Sprintf("contents failed to match %d pattern%s: %v", count, suffix, strings.Join(p.FailedPatterns, ", "))
+    return fmt.Sprintf("contents failed to match %d pattern(s): %v", len(p.FailedPatterns), strings.Join(p.FailedPatterns, ", "))
 }
