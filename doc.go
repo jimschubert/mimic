@@ -1,14 +1,17 @@
 /*
 Package mimic provides a utility for interacting with console or terminal based applications.
 
-A mimic/Mimic internally constructs two pseudo-terminals: one wrapping go-expect,
-and another construct of creak/pty. This allows for either stream-based or view-based inspection of strings/patterns.
+The Mimic type internally constructs two pseudo-terminals: one wrapping go-expect,
+and another constructor from creack/pty. This allows for either stream-based or view-based inspection of strings/patterns.
+
+Stream-based inspections are useful for interactive flows where you need to wait for and respond to prompts in real-time.
+View-based inspections are better for validating final terminal state after all output has been rendered.
 
 The key difference between the two is that stream-based inspections provided by
 Mimic.ExpectString and Mimic.ExpectPattern will wait for a configurable amount
 of time for any text matching the criteria, then _fail_ if no match is found. The search
 criteria passed to these functions is evaluated repeatedly as bytes are written to your
-output stream. Keep this in mind, as very complex patterns can be slow. The underlying views are raw pty,
+output stream (very complex patterns can be slow). The underlying views are raw pty,
 and the output is therefore not formatted as it would be within a terminal.
 
 The view-based inspections provided by Mimic.ContainsString and Mimic.ContainsPattern,
@@ -57,6 +60,7 @@ implementations using github.com/AlecAivazis/survey/v2. For example:
 			console.WriteString("Tom\n")
 			console.ExpectString("How old are you?")
 			console.WriteString("20\n")
+			// ExpectString accepts multiple strings to match
 			console.ExpectString("Tom", "20")
 			if !console.ContainsString("What is your name?", "How old are you?", "Tom", "20") {
 				panic("My answers weren't displayed!")
@@ -73,13 +77,15 @@ implementations using github.com/AlecAivazis/survey/v2. For example:
 		fmt.Fprintf(os.Stdout, "%s is %d.\n", answers.Name, answers.Age)
 	 }
 
-Notice in the above example that all expectations should be invoked asynchronously from the thread being instrumented.
+Notice in the above example that all expectations should be invoked asynchronously from the goroutine being instrumented.
 
 Testing
 
 Mimic provides a Suite based on github.com/stretchr/testify/suite which allows creation of a new mimic per test, or
 a suite-level mimic can be created for more advanced scenarios. Embed suite.Suite into a test struct, then add Test* functions
-to implement your tests. Follow testify's documentation for more. Here's an slimmed-down example from mimic's own tests:
+to implement your tests. Follow testify's documentation for more. The default SuiteOptions apply a maximum runtime
+for the suite, and you can override SuiteOptions on your embedded type to change or extend these defaults.
+Here's a slimmed-down example from mimic's own tests:
 
 	  package suite
 
@@ -125,12 +131,12 @@ to implement your tests. Follow testify's documentation for more. Here's an slim
 		assert.NoError(m.T(), err, "pty should have allowed the write!")
 		assert.Equal(m.T(), written, fullWriteWidth, "pty should have written all bytes!")
 
-		assert.NoError(m.T(), console.ExpectString(full), "Emulated terminal should be %d columns, not %d columns as the written string", terminalWidth, fullWriteWidth)
-		assert.Error(m.T(), console.ExpectString(strings.Repeat(character, terminalWidth+1)), "Emulated terminal should be %d columns, but found %d characters", terminalWidth, terminalWidth+1)
-		assert.Error(m.T(), console.ExpectString(strings.Repeat(character, terminalWidth)), "Emulated terminal should have wrapped text at %d columns", terminalWidth)
+		// Stream-based: raw pty sees all characters, including wrapped ones
+		assert.NoError(m.T(), console.ExpectString(full), "Stream should contain full %d character string", fullWriteWidth)
 
-		assert.False(m.T(), console.ContainsString(full), "underlying terminal is expected to wrap")
-		assert.True(m.T(), console.ContainsString(strings.Repeat(character, terminalWidth)+"\n"+strings.Repeat(character, wrapLength)), "underlying terminal is expected to wrap")
+		// View-based: formatted terminal view shows wrapping behavior
+		assert.False(m.T(), console.ContainsString(full), "View should not contain unwrapped %d character string", fullWriteWidth)
+		assert.True(m.T(), console.ContainsString(strings.Repeat(character, terminalWidth)+"\n"+strings.Repeat(character, wrapLength)), "View should show text wrapped at %d columns", terminalWidth)
 	  }
 
 	  func TestMimicOperationsSuite(t *testing.T) {
@@ -140,5 +146,13 @@ to implement your tests. Follow testify's documentation for more. Here's an slim
 
 		suite.Run(t, test)
 	  }
+
+Errors and pattern matching
+
+In addition to the bool-returning helpers ContainsString and ContainsPattern, Mimic also provides
+ContainsStringE and ContainsPatternE which return a bool and error. ContainsStringE reports underlying
+flush/console errors, while ContainsPatternE will return a PatternError when the contents do not satisfy
+all requested patterns. PatternError exposes both the failed patterns and the terminal contents at the
+time of evaluation to aid in debugging.
 */
 package mimic
