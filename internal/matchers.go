@@ -2,8 +2,10 @@ package internal
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 
@@ -17,9 +19,10 @@ type FlushMatcher struct{}
 
 func (f FlushMatcher) Match(v interface{}) bool {
 	if err, ok := v.(error); ok {
-		if pathError, isReadErr := err.(*fs.PathError); isReadErr {
-			if pathError.Op == "read" && pathError.Err.Error() == "i/o timeout" {
-				// we've flushed as much as we can and hit a read timeout
+		var pathError *fs.PathError
+		if errors.As(err, &pathError) && pathError.Op == "read" {
+			// we've flushed as much as we can and hit a read timeout
+			if errors.Is(pathError.Err, os.ErrDeadlineExceeded) || pathError.Err.Error() == "i/o timeout" {
 				return true
 			}
 		}
