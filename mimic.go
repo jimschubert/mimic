@@ -193,14 +193,24 @@ func (m *Mimic) Flush() error {
 // ContainsString determines if the emulated terminal's view matches specified string. A "view" takes into account terminal row/columns.
 // Terminal contents are stripped of ANSI escape characters and trimmed.
 func (m *Mimic) ContainsString(str ...string) bool {
-	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
-	// instead, we Flush which writes all runes to the terminal view, and check regexes against that
-	err := m.Flush()
+	ok, err := m.ContainsStringE(str...)
 	if err != nil {
 		if isDebugEnabled() {
 			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsString: %v\n", err)
 		}
 		return false
+	}
+	return ok
+}
+
+// ContainsStringE determines if the emulated terminal's view matches specified string. A "view" takes into account terminal row/columns.
+// Terminal contents are stripped of ANSI escape characters and trimmed. Returns an error if the underlying console cannot be flushed.
+func (m *Mimic) ContainsStringE(str ...string) (bool, error) {
+	// note: we don't use go-expect's Regexp matcher here because it can invoke multiple times on the buffer
+	// instead, we Flush which writes all runes to the terminal view, and check regexes against that
+	err := m.Flush()
+	if err != nil {
+		return false, err
 	}
 
 	v := Viewer{Mimic: m, StripAnsi: true, Trim: true}
@@ -217,12 +227,28 @@ func (m *Mimic) ContainsString(str ...string) bool {
 			failed += 1
 		}
 	}
-	return failed == 0
+	return failed == 0, nil
 }
 
 // ContainsPattern determines if the emulated terminal's view contains one or more specified patterns.
 // Patterns are evaluated against formatted terminal contents, stripped of ANSI escape characters and trimmed.
 func (m *Mimic) ContainsPattern(pattern ...string) bool {
+	ok, err := m.ContainsPatternE(pattern...)
+	if err != nil {
+		if pErr, okPattern := err.(PatternError); okPattern && isDebugEnabled() {
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern failed on: %v\n", strings.Join(pErr.FailedPatterns, ","))
+		} else if isDebugEnabled() {
+			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern: %v\n", err)
+		}
+		return false
+	}
+	return ok
+}
+
+// ContainsPatternE determines if the emulated terminal's view contains one or more specified patterns.
+// Patterns are evaluated against formatted terminal contents, stripped of ANSI escape characters and trimmed.
+// Returns a PatternError when contents do not satisfy all requested patterns.
+func (m *Mimic) ContainsPatternE(pattern ...string) (bool, error) {
 	var regexes []*regexp.Regexp
 	for _, p := range pattern {
 		re := regexp.MustCompile(p)
@@ -233,10 +259,7 @@ func (m *Mimic) ContainsPattern(pattern ...string) bool {
 	// instead, we Flush which writes all runes to the terminal view, and check regexes against that
 	err := m.Flush()
 	if err != nil {
-		if isDebugEnabled() {
-			_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern: %v\n", err)
-		}
-		return false
+		return false, err
 	}
 
 	v := Viewer{Mimic: m, StripAnsi: true, Trim: true}
@@ -249,14 +272,17 @@ func (m *Mimic) ContainsPattern(pattern ...string) bool {
 	}
 
 	if len(pattern) > 0 && len(failed) == 0 {
-		return true
+		return true, nil
 	}
 
-	if isDebugEnabled() {
-		_, _ = fmt.Fprintf(os.Stderr, "[Error]: ContainsPattern failed on: %v\n", strings.Join(failed, ","))
+	if len(failed) > 0 {
+		return false, PatternError{
+			Contents:       contents,
+			FailedPatterns: failed,
+		}
 	}
 
-	return false
+	return false, nil
 }
 
 // ExpectPattern waits for the emulated terminal's view to contain one or more specified patterns
