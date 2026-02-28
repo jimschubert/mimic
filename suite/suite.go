@@ -182,13 +182,12 @@ func (b *Suite) Mimic(opts ...mimic.Option) (*mimic.Mimic, error) {
 	}
 
 	var err error
-	tc, ok := b.testCases[key];
-	if !ok {
+	// this needs to be throwaway + assign inline, otherwise it triggers lint: ineffassign
+	if _, ok := b.testCases[key]; !ok {
 		b.T().Logf("WARNING: BeforeTest not called for %s, auto-initializing", key)
-		tc = &testCase{
+		b.testCases[key] = &testCase{
 			TestName: key,
 		}
-		b.testCases[key] = tc
 	}
 	b.testCases[key].mimic, err = mimic.NewMimic(opts...)
 	return b.testCases[key].mimic, err
