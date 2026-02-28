@@ -182,6 +182,14 @@ func (b *Suite) Mimic(opts ...mimic.Option) (*mimic.Mimic, error) {
 	}
 
 	var err error
+	tc, ok := b.testCases[key];
+	if !ok {
+		b.T().Logf("WARNING: BeforeTest not called for %s, auto-initializing", key)
+		tc = &testCase{
+			TestName: key,
+		}
+		b.testCases[key] = tc
+	}
 	b.testCases[key].mimic, err = mimic.NewMimic(opts...)
 	return b.testCases[key].mimic, err
 }
