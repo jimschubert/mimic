@@ -71,7 +71,7 @@ func WithIdleDuration(duration time.Duration) Option {
 }
 
 // WithOutput writes a copy of emulated console output to w
-// Not compatible with WithStdout
+// Not compatible with WithStdout. Will panic if invoked more than once.
 func WithOutput(w io.Writer) Option {
 	return func(opt *mimicOpt) {
 		if opt.w != io.Discard {
@@ -135,8 +135,7 @@ func (m *Mimic) WaitForIdle(ctx context.Context) error {
 				started = time.Now()
 			}
 
-			if coord != emptyCoord && time.Now().Sub(started) >= m.idleDuration {
-				done <- struct{}{}
+			if coord != emptyCoord && time.Since(started) >= m.idleDuration {
 				return
 			}
 
